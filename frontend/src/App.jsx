@@ -149,7 +149,7 @@ export default function App() {
   useEffect(() => {
     if (!isSuperAdmin || !session?.token) return;
     let active = true;
-    fetch("/api/members", {
+    fetch(`${API_URL}/api/members`, {
       headers: { Authorization: `Bearer ${session.token}` },
     })
       .then((response) => {
@@ -177,8 +177,11 @@ export default function App() {
     setFilter("All members");
   }
 
+  const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8000";
+  
   async function api(path, options = {}, token = session?.token) {
-    const response = await fetch(`/api${path}`, {
+    const response = await fetch(`${API_URL}/api${path}`, {
       ...options,
       headers: {
         ...options.headers,
