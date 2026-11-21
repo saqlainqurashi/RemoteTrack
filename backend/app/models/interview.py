@@ -18,8 +18,12 @@ class Interview(Base):
         Integer, primary_key=True
     )
 
-    application_id: Mapped[int] = mapped_column(
-        ForeignKey("applications.id"), index=True
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+
+    application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("applications.id", ondelete="SET NULL"), index=True, nullable=True
     )
 
     round_name: Mapped[str] = mapped_column(
@@ -48,6 +52,10 @@ class Interview(Base):
     )
 
     application: Mapped["Application"] = relationship(
+        back_populates="interviews"
+    )
+
+    user: Mapped["User"] = relationship(
         back_populates="interviews"
     )
 

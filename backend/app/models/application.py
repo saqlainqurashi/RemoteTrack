@@ -55,7 +55,8 @@ class Application(Base):
     )
 
     interviews: Mapped[list["Interview"]] = relationship(
-        back_populates="application"
+        back_populates="application",
+        passive_deletes=True,
     )
 
 

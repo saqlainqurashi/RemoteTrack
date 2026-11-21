@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.core.security import create_access_token
+from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models import User
 
@@ -86,6 +86,31 @@ class TrackingAccessTests(unittest.TestCase):
         self.assertIsNone(response.json()['meeting_link'])
         self.assertEqual(self.client.put(path, json=payload, headers=self.headers(1)).status_code, 200)
 
+    def test_standalone_interview_and_application_deletion(self):
+        headers = self.headers(2)
+        standalone = {
+            'application_id': None,
+            'round_name': 'Recruiter screen',
+            'scheduled_at': '2026-12-01T10:00:00+05:00',
+        }
+        response = self.client.post('/interviews', json=standalone, headers=headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertIsNone(response.json()['application_id'])
+        self.assertEqual(response.json()['user_id'], 2)
+        self.assertEqual(len(self.client.get('/interviews', headers=headers).json()), 1)
+
+        application = self.create_application()
+        linked_response = self.client.post(
+            '/interviews', json=self.interview_payload(application['id']), headers=headers
+        )
+        self.assertEqual(linked_response.status_code, 201, linked_response.text)
+        path = '/applications/' + str(application['id'])
+        self.assertEqual(self.client.delete(path, headers=self.headers(3)).status_code, 404)
+        self.assertEqual(self.client.delete(path, headers=headers).status_code, 204)
+        remaining = self.client.get('/interviews', headers=headers).json()
+        self.assertEqual(len(remaining), 2)
+        self.assertTrue(all(item['application_id'] is None for item in remaining))
+
     def test_authentication_and_validation(self):
         application = self.create_application()
         payload = self.interview_payload(application['id'])
@@ -101,6 +126,20 @@ class TrackingAccessTests(unittest.TestCase):
             db.get(User, 2).is_active = False
             db.commit()
         self.assertEqual(self.client.get('/applications', headers=self.headers(2)).status_code, 401)
+
+    def test_login_returns_user_with_access_token(self):
+        password = 'MemberPassword123!'
+        with Session(self.engine) as db:
+            db.get(User, 2).password_hash = hash_password(password)
+            db.commit()
+        response = self.client.post(
+            '/auth/login',
+            data={'username': 'one@example.com', 'password': password},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['access_token'])
+        self.assertEqual(response.json()['user']['id'], 2)
+        self.assertEqual(response.json()['user']['email'], 'one@example.com')
 
 
 if __name__ == '__main__':

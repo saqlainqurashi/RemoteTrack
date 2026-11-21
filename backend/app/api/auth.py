@@ -79,6 +79,7 @@ def login(
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
+        user=UserResponse.model_validate(user),
     )
 
 

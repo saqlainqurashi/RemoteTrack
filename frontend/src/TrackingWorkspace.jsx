@@ -6,10 +6,12 @@ const applicationStatuses = [
   "interviewing",
   "offer",
   "rejected",
+  "converted",
   "withdrawn",
 ];
 const interviewStatuses = [
   "scheduled",
+  "in_progress",
   "completed",
   "cancelled",
   "rescheduled",
@@ -57,7 +59,12 @@ export default function TrackingWorkspace({
   const [status, setStatus] = useState("");
   const [owner, setOwner] = useState("");
   const [reload, setReload] = useState(0);
+  const [now, setNow] = useState(Date.now);
   const admin = profile.role === "superadmin";
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   // The component stays mounted across tracking tabs. Load once per authenticated workspace.
   useEffect(() => {
     let cancelled = false;
@@ -95,17 +102,14 @@ export default function TrackingWorkspace({
   const scopedApplications = applications.filter(
     (application) => !owner || application.user_id === Number(owner),
   );
-  const scopedIds = new Set(
-    scopedApplications.map((application) => application.id),
-  );
-  const scopedInterviews = interviews.filter((interview) =>
-    scopedIds.has(interview.application_id),
+  const scopedInterviews = interviews.filter(
+    (interview) => !owner || interview.user_id === Number(owner),
   );
   const upcoming = scopedInterviews
     .filter(
       (interview) =>
         ["scheduled", "rescheduled"].includes(interview.status) &&
-        new Date(interview.scheduled_at) >= new Date(),
+        new Date(interview.scheduled_at) >= now,
     )
     .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
   const applicationRows = scopedApplications.filter(
@@ -118,7 +122,7 @@ export default function TrackingWorkspace({
   const interviewRows = scopedInterviews.filter((interview) => {
     const application = appById.get(interview.application_id);
     return (
-      `${application?.company_name} ${application?.job_title} ${interview.round_name} ${interview.notes || ""}`
+      `${application?.company_name || "Standalone interview"} ${application?.job_title || ""} ${interview.round_name} ${interview.notes || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()) &&
       (!status || interview.status === status)
@@ -146,7 +150,9 @@ export default function TrackingWorkspace({
           ...(admin && !record ? { user_id: Number(form.get("user_id")) } : {}),
         }
       : {
-          application_id: Number(form.get("application_id")),
+          application_id: form.get("application_id")
+            ? Number(form.get("application_id"))
+            : null,
           round_name: form.get("round_name").trim(),
           scheduled_at: new Date(form.get("scheduled_at")).toISOString(),
           meeting_link: form.get("meeting_link") || null,
@@ -181,6 +187,34 @@ export default function TrackingWorkspace({
       userById.get(application?.user_id)?.full_name ||
       `User #${application?.user_id}`
     );
+  }
+  function memberName(userId) {
+    return userById.get(userId)?.full_name || `User #${userId}`;
+  }
+  async function deleteApplication(application) {
+    if (
+      !window.confirm(
+        `Delete the ${application.company_name} application? Its interviews will remain in your tracker.`,
+      )
+    )
+      return;
+    setError("");
+    try {
+      await api(`/applications/${application.id}`, { method: "DELETE" });
+      setApplications((current) =>
+        current.filter((item) => item.id !== application.id),
+      );
+      setInterviews((current) =>
+        current.map((item) =>
+          item.application_id === application.id
+            ? { ...item, application_id: null }
+            : item,
+        ),
+      );
+      setNotice("Application deleted. Its interviews were kept.");
+    } catch (failure) {
+      setError(failure.message);
+    }
   }
   function interviewTable(rows) {
     return (
@@ -217,12 +251,14 @@ export default function TrackingWorkspace({
                     )}
                   </td>
                   <td>
-                    {application?.company_name}
-                    <small className="record-notes">
-                      {application?.job_title}
-                    </small>
+                    {application?.company_name || "Standalone interview"}
+                    {application?.job_title && (
+                      <small className="record-notes">
+                        {application.job_title}
+                      </small>
+                    )}
                   </td>
-                  {admin && <td>{ownerName(application)}</td>}
+                  {admin && <td>{memberName(interview.user_id)}</td>}
                   <td>{timeLabel(interview.scheduled_at)}</td>
                   <td>
                     <span className="role">{interview.status}</span>
@@ -291,7 +327,7 @@ export default function TrackingWorkspace({
           {page !== "Applications" && (
             <button
               className={page === "Overview" ? "secondary" : "primary"}
-              disabled={loading || !!error || !applications.length}
+              disabled={loading || !!error}
               onClick={() => openEditor("interview")}
             >
               + Add interview
@@ -335,15 +371,37 @@ export default function TrackingWorkspace({
             )}
             {page === "Overview" ? (
               <>
-                <section className="stats">
+                <section className="stats dashboard-stats">
                   {[
-                    ["Applications", scopedApplications.length],
+                    ["Total interviews", scopedInterviews.length],
+                    [
+                      "Ongoing interviews",
+                      scopedInterviews.filter(
+                        (interview) => interview.status === "in_progress",
+                      ).length,
+                    ],
+                    [
+                      "Past interviews",
+                      scopedInterviews.filter(
+                        (interview) =>
+                          ["completed", "cancelled"].includes(interview.status) ||
+                          (["scheduled", "rescheduled"].includes(interview.status) &&
+                            new Date(interview.scheduled_at) < now),
+                      ).length,
+                    ],
                     ["Upcoming interviews", upcoming.length],
                     [
-                      "Offers",
+                      "Rejected",
                       scopedApplications.filter(
                         (application) =>
-                          application.application_status === "offer",
+                          application.application_status === "rejected",
+                      ).length,
+                    ],
+                    [
+                      "Converted",
+                      scopedApplications.filter(
+                        (application) =>
+                          application.application_status === "converted",
                       ).length,
                     ],
                   ].map(([title, count]) => (
@@ -370,7 +428,7 @@ export default function TrackingWorkspace({
                   <div>
                     <h3>Keep your next step in view.</h3>
                     <p>
-                      Add an application, then schedule its interview rounds.
+                      Schedule interviews with or without a linked application.
                     </p>
                   </div>
                   <button onClick={() => setPage("Applications")}>
@@ -469,6 +527,12 @@ export default function TrackingWorkspace({
                               >
                                 Edit
                               </button>
+                              <button
+                                className="text-action danger-action"
+                                onClick={() => deleteApplication(application)}
+                              >
+                                Delete
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -483,11 +547,6 @@ export default function TrackingWorkspace({
                   </div>
                 ) : (
                   interviewTable(interviewRows)
-                )}
-                {page === "Interviews" && !applications.length && (
-                  <p className="panel-footer">
-                    Add an application before scheduling its interviews.
-                  </p>
                 )}
               </section>
             )}
@@ -532,7 +591,7 @@ export default function TrackingWorkspace({
             <p>
               {editor.kind === "application"
                 ? "Capture the details of your opportunity."
-                : "Schedule a round for an existing application."}
+                : "Schedule an interview, with or without an application."}
             </p>
             <form onSubmit={save}>
               <fieldset disabled={saving}>
@@ -619,10 +678,9 @@ export default function TrackingWorkspace({
                       <select
                         name="application_id"
                         defaultValue={editor.record?.application_id || ""}
-                        required
                       >
-                        <option value="" disabled>
-                          Select an application
+                        <option value="">
+                          No application
                         </option>
                         {applications.map((application) => (
                           <option key={application.id} value={application.id}>

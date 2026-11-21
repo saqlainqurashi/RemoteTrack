@@ -46,3 +46,7 @@ class User(Base):
         back_populates="user"
     )
 
+    interviews: Mapped[list["Interview"]] = relationship(
+        back_populates="user"
+    )
+

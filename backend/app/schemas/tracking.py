@@ -29,7 +29,7 @@ class ApplicationResponse(ApplicationData):
 class InterviewData(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    application_id: int = Field(gt=0)
+    application_id: int | None = Field(default=None, gt=0)
     round_name: str = Field(min_length=1, max_length=100)
     scheduled_at: AwareDatetime
     meeting_link: HttpUrl | None = None
@@ -41,7 +41,8 @@ class InterviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    application_id: int
+    user_id: int
+    application_id: int | None
     round_name: str
     scheduled_at: datetime
     meeting_link: str | None

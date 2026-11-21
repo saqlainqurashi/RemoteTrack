@@ -111,7 +111,14 @@ function initials(name) {
 
 export default function App() {
   const [page, setPage] = useState("Overview");
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("remotetrack-session"));
+      return saved?.token && saved?.user ? saved : null;
+    } catch {
+      return null;
+    }
+  });
   const [members, setMembers] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All members");
@@ -124,10 +131,41 @@ export default function App() {
   const isSuperAdmin = profile?.role === "superadmin";
 
   useEffect(() => {
+    try {
+      if (session) {
+        sessionStorage.setItem("remotetrack-session", JSON.stringify(session));
+      } else {
+        sessionStorage.removeItem("remotetrack-session");
+      }
+    } catch {}
+  }, [session]);
+
+  useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || !session?.token) return;
+    let active = true;
+    fetch("/api/members", {
+      headers: { Authorization: `Bearer ${session.token}` },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load members.");
+        return response.json();
+      })
+      .then((users) => {
+        if (active) setMembers(users);
+      })
+      .catch((failure) => {
+        if (active) setNotice(failure.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isSuperAdmin, session?.token]);
 
   function signOut() {
     setSession(null);
@@ -160,6 +198,7 @@ export default function App() {
             : "The request could not be completed. Please try again.",
       );
     }
+    if (response.status === 204) return null;
     return response.json();
   }
 
@@ -176,13 +215,9 @@ export default function App() {
           password: form.get("password"),
         }),
       });
-      const user = await api("/auth/me", {}, result.access_token);
-      const users =
-        user.role === "superadmin"
-          ? await api("/members", {}, result.access_token)
-          : [];
-      setMembers(users);
+      const user = result.user;
       setSession({ user, token: result.access_token });
+      setMembers([]);
       setPage("Overview");
     } catch (failure) {
       setError(

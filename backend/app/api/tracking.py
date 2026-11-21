@@ -56,18 +56,30 @@ def update_application(application_id: int, payload: ApplicationData, db: DBSess
     return application
 
 
+@router.delete("/applications/{application_id}", status_code=204)
+def delete_application(application_id: int, db: DBSession, user: CurrentUser):
+    application = accessible_application(application_id, db, user)
+    for interview in application.interviews:
+        interview.application_id = None
+    db.delete(application)
+    db.commit()
+
+
 @router.get("/interviews", response_model=list[InterviewResponse])
 def list_interviews(db: DBSession, user: CurrentUser):
-    statement = select(Interview).join(Application).order_by(Interview.scheduled_at, Interview.id)
+    statement = select(Interview).order_by(Interview.scheduled_at, Interview.id)
     if user.role != "superadmin":
-        statement = statement.where(Application.user_id == user.id)
+        statement = statement.where(Interview.user_id == user.id)
     return db.scalars(statement).all()
 
 
 @router.post("/interviews", response_model=InterviewResponse, status_code=201)
 def create_interview(payload: InterviewData, db: DBSession, user: CurrentUser):
-    accessible_application(payload.application_id, db, user)
     values = payload.model_dump()
+    application = None
+    if payload.application_id is not None:
+        application = accessible_application(payload.application_id, db, user)
+    values["user_id"] = application.user_id if application else user.id
     values["meeting_link"] = str(payload.meeting_link) if payload.meeting_link else None
     interview = Interview(**values)
     db.add(interview)
@@ -78,14 +90,18 @@ def create_interview(payload: InterviewData, db: DBSession, user: CurrentUser):
 
 @router.put("/interviews/{interview_id}", response_model=InterviewResponse)
 def update_interview(interview_id: int, payload: InterviewData, db: DBSession, user: CurrentUser):
-    statement = select(Interview).join(Application).where(Interview.id == interview_id)
+    statement = select(Interview).where(Interview.id == interview_id)
     if user.role != "superadmin":
-        statement = statement.where(Application.user_id == user.id)
+        statement = statement.where(Interview.user_id == user.id)
     interview = db.scalar(statement)
     if interview is None:
         raise HTTPException(status_code=404, detail="Interview not found")
-    accessible_application(payload.application_id, db, user)
+    if payload.application_id is not None:
+        application = accessible_application(payload.application_id, db, user)
+        if application.user_id != interview.user_id:
+            raise HTTPException(status_code=404, detail="Application not found")
     values = payload.model_dump()
+    values.pop("user_id", None)
     values["meeting_link"] = str(payload.meeting_link) if payload.meeting_link else None
     for field, value in values.items():
         setattr(interview, field, value)
