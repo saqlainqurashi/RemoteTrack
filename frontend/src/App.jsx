@@ -177,20 +177,31 @@ export default function App() {
     setFilter("All members");
   }
 
-  const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000";
-  
+
+  const API_URL = (
+    import.meta.env.VITE_API_URL || "http://localhost:8000"
+  ).replace(/\/+$/, "");
+
   async function api(path, options = {}, token = session?.token) {
-    const response = await fetch(`${API_URL}/api${path}`, {
+    // Remove any existing /api prefix
+    const cleanPath = path.replace(/^\/api(?=\/|$)/, "");
+
+    // Ensure exactly one slash between base URL and path
+    const url = `${API_URL}/${cleanPath.replace(/^\/+/, "")}`;
+
+    const response = await fetch(url, {
       ...options,
       headers: {
         ...options.headers,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
+
     if (response.status === 401 && session) signOut();
+
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
+
       throw new Error(
         typeof body.detail === "string"
           ? body.detail
@@ -201,9 +212,12 @@ export default function App() {
             : "The request could not be completed. Please try again.",
       );
     }
+
     if (response.status === 204) return null;
+
     return response.json();
   }
+
 
   async function signIn(event) {
     event.preventDefault();
